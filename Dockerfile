@@ -1,4 +1,4 @@
-FROM node:20.11-alpine3.18 as build
+FROM node:20.11-alpine3.18 AS build
 
 RUN corepack enable
 
@@ -7,6 +7,7 @@ WORKDIR /app
 COPY ./service ./
 RUN corepack prepare --activate
 RUN pnpm install --production --frozen-lockfile > /dev/null
+COPY ./pdsadmin/* /usr/local/bin/
 
 # Uses assets from build stage to reduce build size
 FROM node:20.11-alpine3.18
@@ -18,6 +19,9 @@ ENTRYPOINT ["dumb-init", "--"]
 
 WORKDIR /app
 COPY --from=build /app /app
+COPY --from=build /usr/local/bin /usr/local/bin
+
+RUN apk add --update openssl curl jq && rm -rf /var/cache/apk/*
 
 EXPOSE 3000
 ENV PDS_PORT=3000
