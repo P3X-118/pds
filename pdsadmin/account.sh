@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/sh
 set -o errexit
 set -o nounset
 set -o pipefail
@@ -110,10 +110,12 @@ elif [[ "${SUBCOMMAND}" == "delete" ]]; then
   fi
 
   echo "This action is permanent."
-  read -r -p "Are you sure you'd like to delete ${DID}? [y/N] " response
-  if [[ ! "${response}" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-    exit 0
-  fi
+  echo "Are you sure you'd like to delete ${DID}? [y/N] "
+  read response
+  case ${response} in
+    [yY]* ) ;;
+    * ) exit 0;;
+  esac
 
   curl_cmd_post \
     --user "admin:${PDS_ADMIN_PASSWORD}" \
