@@ -40,8 +40,11 @@ if [[ "${SUBCOMMAND}" == "list" ]]; then
     OUTPUT="${OUTPUT},${ITEM}"
   done
   OUTPUT="${OUTPUT}]"
-  echo "${OUTPUT}" | jq --raw-output '.[] | [.handle, .email, .did] | @tsv' | column --table
-
+  #echo "${OUTPUT}" | jq --raw-output '.[] | [.handle, .email, .did] | @tsv' | column --table
+  echo "${OUTPUT}" | jq --raw-output '.[] | [.handle,.email,.did] | @tsv' |
+  while IFS=$'\t' read -r handle email did; do
+    printf "%-20s %-30s %-10s\n" "$handle" "$email" "$did"
+  done
 #
 # account create
 #
