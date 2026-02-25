@@ -1,4 +1,4 @@
-FROM node:20.13.1-alpine3.18 AS build
+FROM node:22-alpine AS build
 
 RUN corepack enable
 
@@ -10,7 +10,7 @@ RUN pnpm install --production --frozen-lockfile > /dev/null
 COPY ./pdsadmin/* /usr/local/bin/
 
 # Uses assets from build stage to reduce build size
-FROM node:20.13.1-alpine3.18
+FROM node:22-alpine
 
 RUN apk add --update dumb-init
 
