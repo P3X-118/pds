@@ -1,13 +1,20 @@
+# NOTE there is an additional build stage below that should match
 FROM node:22-alpine AS build
 
 RUN corepack enable
+
+# Build goat binary
+ENV CGO_ENABLED=0
+ENV GODEBUG="netdns=go"
+WORKDIR /tmp
+RUN apk add --no-cache git go
+RUN git clone https://github.com/bluesky-social/goat.git && cd goat && git checkout v0.2.2 && go build -o /tmp/goat-build .
 
 # Move files into the image and install
 WORKDIR /app
 COPY ./service ./
 RUN corepack prepare --activate
 RUN pnpm install --production --frozen-lockfile > /dev/null
-COPY ./pdsadmin/* /usr/local/bin/
 
 # Uses assets from build stage to reduce build size
 FROM node:22-alpine
@@ -19,9 +26,7 @@ ENTRYPOINT ["dumb-init", "--"]
 
 WORKDIR /app
 COPY --from=build /app /app
-COPY --from=build /usr/local/bin /usr/local/bin
-
-RUN apk add --update openssl curl jq && rm -rf /var/cache/apk/*
+COPY --from=build /tmp/goat-build /usr/local/bin/goat
 
 EXPOSE 3000
 ENV PDS_PORT=3000
