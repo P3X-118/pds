@@ -167,7 +167,7 @@ PDS installation successful!
 Check service status      : sudo systemctl status pds
 Watch service logs        : sudo docker logs -f pds
 Backup service data       : /pds
-PDS Admin command         : pdsadmin
+PDS Admin command         : docker exec pds goat pds admin
 
 Required Firewall Ports
 ------------------------------------------------------------------------
@@ -185,7 +185,7 @@ your-domain.net              A          your-ip-address
 
 Detected public IP of this server: your-ip-address
 
-To see pdsadmin commands, run "pdsadmin help"
+To see admin commands, run "docker exec pds goat pds admin"
 
 ========================================================================
 ```
@@ -321,10 +321,11 @@ LOG_LEVEL=debug
 
 ### Updating your PDS
 
-It is recommended that you keep your PDS up to date with new versions. You can use the `pdsadmin` tool to update your PDS.
+It is recommended that you keep your PDS up to date with new versions. Pull the latest image and restart the container:
 
 ```bash
-sudo pdsadmin update
+sudo docker pull ghcr.io/bluesky-social/pds:0.4
+sudo systemctl restart pds
 ```
 
 ### Environment Variables

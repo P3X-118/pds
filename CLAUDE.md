@@ -7,16 +7,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This directory is a fork of [`bluesky-social/pds`](https://github.com/bluesky-social/pds), the *distribution* repo for self-hosting a Bluesky Personal Data Server. Upstream ships:
 
 - A thin Node.js wrapper (`service/index.js`) that boots `@atproto/pds` and exposes a `/tls-check` endpoint for Caddy on-demand TLS.
-- A `Dockerfile` that bundles the wrapper + the `pdsadmin/*` admin scripts into `ghcr.io/bluesky-social/pds`.
-- An `installer.sh` that provisions a *single* PDS host with Docker + Caddy + a `pds.service` systemd unit + a `watchtower` auto-updater, all rooted at `/pds` (hard-coded — the installer rejects any other path).
-- `pdsadmin.sh` and the `pdsadmin/` subcommands, which are thin `curl` wrappers over the PDS admin XRPC endpoints (`com.atproto.admin.*`, `com.atproto.server.createInviteCode`, etc.) authenticated with HTTP Basic `admin:$PDS_ADMIN_PASSWORD` from `/pds/pds.env`.
+- A `Dockerfile` that bundles the wrapper + the [`goat`](https://github.com/bluesky-social/goat) admin CLI binary into `ghcr.io/bluesky-social/pds`. Upstream's bash `pdsadmin/*` scripts have been **retired** in this fork in favor of `goat pds admin`.
+- An `installer.sh` that provisions a *single* PDS host with Docker + Caddy + a `pds.service` systemd unit + a `watchtower` auto-updater, all rooted at `/pds` (hard-coded — the installer rejects any other path). Not used in SGC deployments.
 
-**The work in this directory has two goals beyond just tracking upstream:**
+**The work in this directory has three goals beyond just tracking upstream:**
 
 1. **Multi-domain production deployment via the SGC playbook.** The single-host, fixed-`/pds`-path, watchtower-driven model from upstream is incompatible with how SGC manages services. We're moving operational ownership to the sister Ansible role at `~/sgc/ansible/roles/pds-ar/` (development home), which gets published as `P3X-118/pds-ar` and consumed from `~/sgc/SGC/requirements.yml`. See `~/sgc/CLAUDE.md` for the playbook conventions.
-2. **A dead-simple admin UX** for the small set of operations we actually do: list/create/delete accounts, reset passwords, takedown/untakedown, mint invite codes, request crawls. Today these live as bash scripts in `pdsadmin/`; the UX should call the same XRPC endpoints rather than reinventing protocol logic.
+2. **A web admin UX (`sgc-pds-admin`)** that fronts goat's admin command surface with operator-level OAuth (Okta primary; Google, Microsoft, Facebook, X planned via `goth`). Lives in a separate repo `P3X-118/sgc-pds-admin`, deployed via its own ansible role `sgc-pds-admin-ar`. One admin instance fronts multiple PDS instances. Operator OAuth secrets are file-based per-environment, derived from `sgc_pgsk` per the SGC pattern. Audit log keyed on OAuth subject.
+3. **Tracking upstream cleanly.** Weekly automated sync (`~/sgc/bin/pds-sync-upstream.sh`) opens a PR into `sgc-dev` with new upstream commits cherry-picked. `main` mirrors `bluesky-social/pds` with `no_push` enforced; customizations flow `sgc-dev` → `sgc`.
 
-When in doubt about whether a change belongs upstream or in our SGC layer: changes to the *PDS protocol surface* (Node wrapper, Dockerfile, admin XRPC calls) belong here and ideally get pushed upstream; changes to *how an instance is deployed/configured/secured* belong in `pds-ar`.
+When in doubt about whether a change belongs upstream or in our SGC layer: changes to the *PDS protocol surface* (Node wrapper, Dockerfile, /tls-check) belong here and ideally get pushed upstream; changes to *how an instance is deployed/configured/secured* belong in `pds-ar`; admin UX work belongs in `sgc-pds-admin`.
 
 ## Repo layout
 
@@ -24,15 +24,7 @@ When in doubt about whether a change belongs upstream or in our SGC layer: chang
 service/               # Node.js entrypoint that runs @atproto/pds
   index.js             # Boots PDS + exposes /tls-check (Caddy on-demand TLS hook)
   package.json         # Pinned to a specific @atproto/pds release (current source of truth for PDS version)
-pdsadmin/              # Bash subcommands invoked by /usr/local/bin/pdsadmin
-  account              # list / create / delete / takedown / untakedown / reset-password
-  create-invite-code   # POSTs to com.atproto.server.createInviteCode
-  request-crawl        # POSTs com.atproto.sync.requestCrawl to relay hosts
-  pdshelp              # Help text for the `pdsadmin help` command
-pdsadmin.sh            # Legacy host-side dispatcher; downloads sub-scripts from GitHub at runtime.
-                       # Inside the container, the pdsadmin/* scripts are copied straight to
-                       # /usr/local/bin and dispatched directly (no network fetch).
-Dockerfile             # node:20.13.1-alpine3.18; pnpm install --production; copies pdsadmin/* to /usr/local/bin
+Dockerfile             # node:22-alpine; multi-stage build that also compiles goat from source and installs it at /usr/local/bin/goat
 compose.yaml           # 3-service stack (caddy + pds + watchtower), all network_mode: host, bind-mounts /pds
 installer.sh           # Single-host bootstrapper for Ubuntu/Debian — NOT used in SGC deployments
 update.sh              # Pulls a fresh compose.yaml and `systemctl restart pds`
@@ -59,14 +51,13 @@ docker build -t pds-local .
 # Bump the pinned PDS version (only step that changes runtime behavior)
 cd service && pnpm update @atproto/pds@<version>
 
-# Run pdsadmin against a deployed instance (host-side, expects /pds/pds.env)
-sudo pdsadmin help
-sudo pdsadmin account list
-sudo pdsadmin account create alice@example.com alice.example.com
-sudo pdsadmin create-invite-code
+# Run goat admin commands against a deployed instance (admin password auto-loaded from /pds/pds.env)
+sudo docker exec pds goat pds admin account list
+sudo docker exec pds goat pds admin account create --handle alice.example.com --email alice@example.com --password <pw>
+sudo docker exec pds goat pds admin create-invites -n 5
 
-# Override the env file location (useful for multi-tenant on one host)
-sudo PDS_ENV_FILE=/sgc/sgc-pds-foo/pds.env pdsadmin account list
+# Run goat from outside the container (point at any PDS, pass admin password explicitly)
+goat pds admin --pds-host https://pds.example.com --admin-password <pw> account list
 ```
 
 There is no test suite, lint config, or CI beyond the image build workflow (`.github/workflows/build-and-push-ghcr.yaml`). Don't invent one without asking.
@@ -74,7 +65,8 @@ There is no test suite, lint config, or CI beyond the image build workflow (`.gi
 ## Architecture notes worth knowing before editing
 
 - **`/tls-check` is load-bearing.** Caddy's on-demand TLS asks PDS whether to issue a cert for a given subdomain. The handler in `service/index.js` returns 200 only for the configured `PDS_HOSTNAME` or for handles that resolve to an account in `serviceHandleDomains`. Breaking this means no certs get issued for new user handles.
-- **Admin auth is a single shared secret** (`PDS_ADMIN_PASSWORD` in `pds.env`, used as HTTP Basic password by every `pdsadmin` subcommand). Every admin XRPC call goes over `https://${PDS_HOSTNAME}/xrpc/...` — the admin scripts hit the *public* hostname, not localhost. Any new admin tooling should follow the same pattern: it's just authenticated XRPC, no privileged side channels.
+- **Admin auth is a single shared secret** (`PDS_ADMIN_PASSWORD` in `pds.env`, used as HTTP Basic password by every `goat pds admin` call). Every admin XRPC call goes over `https://${PDS_HOSTNAME}/xrpc/...` — the public hostname, not localhost. The `sgc-pds-admin` web UX is the place where per-operator identity gets layered on top via OAuth, with the shared admin secret kept server-side and never reaching the browser.
+- **goat's env file lookup is hardcoded to `/pds/pds.env`** (in `NewPDSAdminClient`). For SGC's `/sgc/sgc-pds-<instance>/pds.env` layout, either pass `--admin-password` explicitly or land an upstream PR adding `PDS_ENV_FILE` env var support. The `sgc-pds-admin` web UX will use the explicit-password approach.
 - **Upstream installer assumptions we're discarding in SGC:**
   - Hard-codes data dir to `/pds`. We use `/sgc/sgc-pds-<instance>` per the SGC pathing convention.
   - Uses `network_mode: host` for all three containers. SGC services run on Traefik-routed Docker networks (`revproxy_service_networks`).
@@ -94,3 +86,7 @@ This is the role that operationalizes PDS in SGC. **It is currently a stub** —
 - No `MIGRATION.md` for promoting an existing `installer.sh`-deployed PDS into the SGC layout (data dir move, env regeneration without invalidating the existing PLC rotation key).
 
 When working on the role, follow the 4-step "Adding a New Ansible Role" pattern in `~/sgc/CLAUDE.md` for wiring it into `~/sgc/SGC/requirements.yml`, `setup.yml`, and `group_vars/mash_servers`. The role-specific comment markers (`# role-specific:pds` / `# /role-specific:pds`) are mandatory — `bin/optimize.py` depends on them.
+
+## Sibling project: `P3X-118/sgc-pds-admin` (planned)
+
+A small Go web app that wraps `goat pds admin` with operator-level OAuth (Okta primary; Google/Microsoft/Facebook/X via `goth`). Server-rendered HTML (templ + htmx). One admin instance fronts multiple PDS instances. Allowlist-based authorization initially; claim-based later. Per-action audit log on the OAuth subject. Deployed via its own ansible role `~/sgc/ansible/roles/sgc-pds-admin-ar/` following the SGC 3-branch model.
