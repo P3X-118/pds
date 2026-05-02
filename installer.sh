@@ -18,9 +18,6 @@ GENERATE_K256_PRIVATE_KEY_CMD="openssl ecparam --name secp256k1 --genkey --noout
 # The Docker compose file.
 COMPOSE_URL="https://raw.githubusercontent.com/bluesky-social/pds/main/compose.yaml"
 
-# The pdsadmin script.
-PDSADMIN_URL="https://raw.githubusercontent.com/bluesky-social/pds/main/pdsadmin.sh"
-
 # System dependencies.
 REQUIRED_SYSTEM_PACKAGES="
   ca-certificates
@@ -393,18 +390,6 @@ SYSTEMD_UNIT_FILE
     fi
   fi
 
-  #
-  # Download and install pdsadmin.
-  #
-  echo "* Downloading pdsadmin"
-  curl \
-    --silent \
-    --show-error \
-    --fail \
-    --output "/usr/local/bin/pdsadmin" \
-    "${PDSADMIN_URL}"
-  chmod +x /usr/local/bin/pdsadmin
-
   cat <<INSTALLER_MESSAGE
 ========================================================================
 PDS installation successful!
@@ -440,7 +425,7 @@ INSTALLER_MESSAGE
   read -p "Create a PDS user account? (y/N): " CREATE_ACCOUNT_PROMPT
 
   if [[ "${CREATE_ACCOUNT_PROMPT}" =~ ^[Yy] ]]; then
-    pdsadmin account create
+    docker exec pds goat pds admin account create
   fi
 
 }

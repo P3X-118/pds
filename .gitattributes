@@ -1,0 +1,4 @@
+# Pin deletions on sgc-dev so upstream cherry-picks don't reintroduce them.
+# Requires `git config merge.ours.driver true` in the local clone, which
+# bin/pds-sync-upstream.sh sets idempotently before cherry-picking.
+.github/workflows/build-and-push-ghcr.yaml merge=ours
